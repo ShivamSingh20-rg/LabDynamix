@@ -1,1 +1,5 @@
-Labdynamic/.envgit rm -r --cached .
+*.env
+**/.env
+.env
+backend/.env
+Labdynamic/.env
