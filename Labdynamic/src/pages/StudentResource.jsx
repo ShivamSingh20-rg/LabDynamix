@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import axios from 'axios';
 import { useResources } from '../Admin/services/Resource';
 import StudentResourceCard from '../components/StudentResourcecard';
-
+import { BACKEND_URL } from '../pages/Api';
 // Helper function to resolve resource quantity safely across different schema styles
 function getAvailableCount(res) {
   if (typeof res?.availableQuantity === 'number') return res.availableQuantity;
@@ -31,7 +31,7 @@ export default function StudentResourcePage() {
         const token = localStorage.getItem('token');
         if (!token) return;
 
-        const res = await axios.get('http://localhost:5000/api/bookings/my-bookings', {
+        const res = await axios.get(`${BACKEND_URL}/bookings/my-bookings`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -182,7 +182,7 @@ export default function StudentResourcePage() {
       const token = localStorage.getItem('token');
 
       const response = await axios.post(
-        'http://localhost:5000/api/bookings',
+        `${BACKEND_URL}/bookings`,
         {
           resourceId,
           slot: slotIdOrLabel,

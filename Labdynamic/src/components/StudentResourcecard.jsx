@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { BACKEND_URL } from '../pages/Api';
 
-// Initialize socket connection (shared single instance)
+ 
 const socket = io(BACKEND_URL, {
   transports: ['websocket'], 
   autoConnect: true,

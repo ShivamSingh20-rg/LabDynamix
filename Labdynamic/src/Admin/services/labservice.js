@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import {BACKEND_URL} from '../../pages/Api';
 
-const API_BASE_URL = 'http://localhost:5000/api/labs';
+ 
 
 export function useLabs() {
   const [labs, setLabs] = useState([]);
@@ -43,7 +44,7 @@ export function useLabs() {
         }
       };
 
-      const { data } = await axios.get(API_BASE_URL, config);
+      const { data } = await axios.get(BACKEND_URL , config);
       setLabs(data);
       setError(null);
     } catch (err) {
@@ -65,7 +66,7 @@ export function useLabs() {
   // 2. Create Lab
   const createLab = async (labData) => {
     try {
-      const { data } = await axios.post(API_BASE_URL, labData, getAuthHeader());
+      const { data } = await axios.post(BACKEND_URL , labData, getAuthHeader());
       setLabs((prev) => [data, ...prev]);
       return data;
     } catch (err) {
@@ -76,7 +77,7 @@ export function useLabs() {
   // 3. Update Lab
   const updateLab = async (id, labData) => {
     try {
-      const { data } = await axios.put(`${API_BASE_URL}/${id}`, labData, getAuthHeader());
+      const { data } = await axios.put(`${BACKEND_URL}/${id}`, labData, getAuthHeader());
       setLabs((prev) =>
         prev.map((item) => (matchesId(item, id) ? data : item))
       );
@@ -89,7 +90,7 @@ export function useLabs() {
   // 4. Delete Lab
   const deleteLab = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/${id}`, getAuthHeader());
+      await axios.delete(`${BACKEND_URL}/${id}`, getAuthHeader());
       setLabs((prev) => prev.filter((item) => !matchesId(item, id)));
     } catch (err) {
       throw new Error(getErrMsg(err));
@@ -100,7 +101,7 @@ export function useLabs() {
   const assignResource = async (labId, resourceData) => {
     try {
       const { data } = await axios.post(
-        `${API_BASE_URL}/${labId}/resources`,
+        `${BACKEND_URL}/${labId}/resources`,
         resourceData,
         getAuthHeader()
       );

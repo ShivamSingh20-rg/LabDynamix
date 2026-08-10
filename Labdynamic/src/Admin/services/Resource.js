@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-
-const API_BASE_URL = 'http://localhost:5000/api';
+import {BACKEND_URL} from '../../pages/Api';
+const API_BASE_URL = BACKEND_URL;
 
 const getAuthHeader = () => {
   const token = localStorage.getItem('labToken');
