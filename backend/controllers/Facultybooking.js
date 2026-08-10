@@ -99,20 +99,32 @@ exports.respondToBooking = async (req, res) => {
         return res.status(404).json({ success: false, message: 'Associated resource not found.' });
       }
 
-      // Stock Validation
-      if (resource.availableQuantity < booking.quantity) {
+      const bookingDate = booking.bookingDate || booking.date;
+      const timeSlot = booking.timeSlot;
+      const requestedQty = Number(booking.quantity) || 1;
+      const totalStock = Number(resource.totalQuantity) || 0;
+
+      // Find all already approved bookings for this resource on the exact same date & time slot
+      const conflictingBookings = await Booking.find({
+        resource: resource._id,
+        status: 'Approved',
+        _id: { $ne: booking._id },
+        $or: [
+          { bookingDate: bookingDate },
+          { date: bookingDate }
+        ],
+        timeSlot: timeSlot
+      });
+
+      const alreadyBookedQty = conflictingBookings.reduce((sum, b) => sum + (Number(b.quantity) || 1), 0);
+
+      // Time Slot Stock Validation
+      if ((alreadyBookedQty + requestedQty) > totalStock) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient resource quantity available (${resource.availableQuantity} left).`,
+          message: `Insufficient resource quantity available for this time slot. Total Stock: ${totalStock}, Already Booked: ${alreadyBookedQty}, Requested: ${requestedQty}.`,
         });
       }
-
-      // Deduct inventory stock
-      resource.availableQuantity -= booking.quantity;
-      if (resource.availableQuantity === 0) {
-        resource.status = 'In Use';
-      }
-      await resource.save();
 
       booking.status = 'Approved';
       booking.approvedBy = facultyId;
@@ -135,49 +147,59 @@ exports.respondToBooking = async (req, res) => {
     const studentId = updatedBooking.user?._id || updatedBooking.user;
     const resourceName = updatedBooking.resource?.name || 'Resource';
 
+    let createdNotification = null;
+
     // 1. Map action to your Notification schema's allowed enum values
     const notificationType = action === 'Approved' ? 'BOOKING_SUCCESS' : 'BOOKING_CANCELED';
     const notificationMessage = action === 'Approved'
       ? `Your booking request for "${resourceName}" has been approved.`
       : `Your booking request for "${resourceName}" was rejected. Reason: ${booking.rejectionReason}`;
 
-    // 2. CREATE & SAVE NOTIFICATION (Using 'recipient' and valid enum)
-    const createdNotification = await Notification.create({
-      recipient: studentId,          // 👈 Schema field 'recipient'
-      title: `Booking ${action}`,
-      message: notificationMessage,
-      type: notificationType,        // 👈 Valid Enum ('BOOKING_SUCCESS' or 'BOOKING_CANCELED')
-      bookingId: booking._id,        // 👈 Linked booking reference
-      read: false
-    });
+    // 2. CREATE & SAVE NOTIFICATION (Safely guarded against missing user references)
+    if (studentId) {
+      try {
+        createdNotification = await Notification.create({
+          recipient: studentId,
+          title: `Booking ${action}`,
+          message: notificationMessage,
+          type: notificationType,
+          bookingId: booking._id,
+          read: false
+        });
 
-    // 3. REAL-TIME SOCKET BROADCASTS
-    const io = getIO();
-    if (io && studentId) {
-      const payload = {
-        _id: createdNotification._id,
-        bookingId: booking._id,
-        title: createdNotification.title,
-        message: createdNotification.message,
-        type: createdNotification.type,
-        status: booking.status,
-        resourceName: resourceName,
-        rejectionReason: booking.rejectionReason,
-        read: false,
-        createdAt: createdNotification.createdAt
-      };
+        // 3. REAL-TIME SOCKET BROADCASTS
+        const io = getIO();
+        if (io) {
+          const payload = {
+            _id: createdNotification._id,
+            bookingId: booking._id,
+            title: createdNotification.title,
+            message: createdNotification.message,
+            type: createdNotification.type,
+            status: booking.status,
+            resourceName: resourceName,
+            rejectionReason: booking.rejectionReason,
+            read: false,
+            createdAt: createdNotification.createdAt
+          };
 
-      // Emit to student rooms
-      const roomStr = String(studentId);
-      io.to(roomStr).to(`user_${roomStr}`).emit('BOOKING_STATUS_UPDATED', payload);
-      io.to(roomStr).to(`user_${roomStr}`).emit('notification_received', payload);
+          const roomStr = String(studentId);
+          io.to(roomStr).to(`user_${roomStr}`).emit('BOOKING_STATUS_UPDATED', payload);
+          io.to(roomStr).to(`user_${roomStr}`).emit('notification_received', payload);
+        }
+      } catch (notifErr) {
+        console.error('Non-fatal notification creation error:', notifErr.message);
+      }
+    } else {
+      console.warn(`⚠️ Warning: Student ID missing for booking ${booking._id}. Skipping notification generation.`);
     }
 
     // Broadcast to faculty category room to sync UI
     const categoryName = updatedBooking.lab?.category || facultyCategory;
-    if (categoryName && io) {
+    const ioInstance = getIO();
+    if (categoryName && ioInstance) {
       const categoryRoom = `category_${categoryName.trim().toUpperCase()}`;
-      io.to(categoryRoom).emit('FACULTY_BOOKING_PROCESSED', {
+      ioInstance.to(categoryRoom).emit('FACULTY_BOOKING_PROCESSED', {
         bookingId: booking._id,
         status: booking.status,
         actionBy: req.user?.name,

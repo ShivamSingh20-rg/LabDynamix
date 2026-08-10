@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { BACKEND_URL } from '../pages/Api';
@@ -7,6 +7,7 @@ const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
   const navigate = useNavigate();
+  const oauthProcessedRef = useRef(false); // Prevents React 18 StrictMode double execution
 
   // 1. Initialize state directly from localStorage
   const [user, setUser] = useState(() => {
@@ -16,11 +17,10 @@ export function AuthProvider({ children }) {
 
   const [loading, setLoading] = useState(false);
 
- 
   const saveAuthSession = (userData, token) => {
     localStorage.setItem('labUser', JSON.stringify(userData));
     localStorage.setItem('labToken', token);
-    setUser(userData); 
+    setUser(userData);
   };
 
   // --- EFFECT 1: Process Google OAuth Redirect Code ---
@@ -28,14 +28,20 @@ export function AuthProvider({ children }) {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
 
-    if (code) {
+    // Run only if code exists AND hasn't been processed yet
+    if (code && !oauthProcessedRef.current) {
+      oauthProcessedRef.current = true;
       setLoading(true);
 
-      // Clean the ?code= parameter from browser URL
+      // Clean the ?code= parameter from browser URL bar immediately
       window.history.replaceState({}, document.title, window.location.pathname);
 
-      // Exchange OAuth code with Express backend
-      axios.post(`${BACKEND_URL}/auth/google`, { code })
+      // 🟢 Fix 1 & 2: Send request to /api/auth/google with explicit redirect_uri
+      axios
+        .post(`${BACKEND_URL}/auth/google`, {
+          code,
+          redirect_uri: window.location.origin, // e.g., "http://localhost:5173" or "https://lab-dynamix.vercel.app"
+        })
         .then((res) => {
           const userData = res.data.user || res.data;
           const token = res.data.token || userData.token;
@@ -43,7 +49,7 @@ export function AuthProvider({ children }) {
           if (userData && token) {
             saveAuthSession(userData, token);
 
-            // Navigate based on role
+            // Navigate based on user role
             const userRole = userData.role?.toLowerCase();
             if (userRole === 'admin') {
               navigate('/admin/dashboard');
@@ -53,12 +59,12 @@ export function AuthProvider({ children }) {
               navigate('/resources');
             }
           } else {
-            console.error("Backend response missing user or token:", res.data);
+            console.error('Backend response missing user or token:', res.data);
           }
         })
         .catch((err) => {
-          console.error("OAuth authentication error:", err.response?.data || err.message);
-          alert("Sign-in failed. Please try again.");
+          console.error('OAuth authentication error:', err.response?.data || err.message);
+          alert(err.response?.data?.message || 'Sign-in failed. Please try again.');
         })
         .finally(() => setLoading(false));
     }
@@ -81,16 +87,17 @@ export function AuthProvider({ children }) {
       }
 
       try {
+        // 🟢 Fix 1: Route endpoint includes /api/auth
         const res = await axios.get(`${BACKEND_URL}/auth/me`, {
           headers: {
-            Authorization: `Bearer ${token}`
-          }
+            Authorization: `Bearer ${token}`,
+          },
         });
 
         setUser(res.data);
         localStorage.setItem('labUser', JSON.stringify(res.data));
       } catch (err) {
-        console.error("Session verification failed:", err.response?.data || err.message);
+        console.error('Session verification failed:', err.response?.data || err.message);
 
         if (err.response && err.response.status === 401) {
           localStorage.removeItem('labUser');
@@ -120,7 +127,7 @@ export function AuthProvider({ children }) {
   );
 }
 
-// Custom hook to consume AuthContext cleanly anywhere
+// Custom hook to consume AuthContext cleanly
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {

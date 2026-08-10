@@ -72,10 +72,13 @@ useEffect(() => {
     }
   };
 
-  const handleDecision = async (bookingId, action, reason = '') => {
+ const handleDecision = async (bookingId, actionType, reason = '') => {
     try {
       setActionLoading((prev) => ({ ...prev, [bookingId]: true }));
       const token = localStorage.getItem('labToken') || localStorage.getItem('token');
+
+      // Ensure action matches the exact case expected by your backend: 'Approved' or 'Rejected'
+      const formattedAction = actionType.toLowerCase().includes('approve') ? 'Approved' : 'Rejected';
 
       const response = await fetch(getApiUrl(`/faculty/respond/${bookingId}`), {
         method: 'PATCH',
@@ -83,15 +86,17 @@ useEffect(() => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ action, rejectionReason: reason }),
+        body: JSON.stringify({ 
+          action: formattedAction, 
+          rejectionReason: reason 
+        }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        // Remove processed booking from state list
         setBookings((prev) => prev.filter((item) => item._id !== bookingId));
-        showNotification(`Booking ${action.toLowerCase()} successfully!`);
+        showNotification(`Booking ${formattedAction.toLowerCase()} successfully!`);
         setRejectingBookingId(null);
         setRejectionReason('');
       } else {

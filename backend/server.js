@@ -5,6 +5,7 @@ const http = require('http');
 const connectDB = require('./config/db');
 const { initSocket } = require('./socket');
 const labRoutes = require('./Routes/lab.route');
+const Resource = require('./models/Resource');
 const authRoutes = require('./Routes/auth.route');
 const resourceRoutes = require('./Routes/Resource.route');
 const { initCronJobs } = require('./config/cronService');
@@ -67,7 +68,19 @@ app.use('/api/faculty', facultyRoutes);
 app.get('/', (req, res) => {
   res.send('LabDynamix API Engine is running...');
 });
+ 
 
+async function syncAllResourceQuantities() {
+  try {
+    const resources = await Resource.find({});
+    for (const resDoc of resources) {
+      await resDoc.save(); // Executes pre('save') hook on every document
+    }
+    console.log('Successfully resynced all resource available quantities!');
+  } catch (err) {
+    console.error('Migration error:', err.message);
+  }
+}
 const PORT = process.env.PORT || 5000;
 
 // Listen on `server`, NOT `app`

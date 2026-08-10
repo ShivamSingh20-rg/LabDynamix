@@ -1,20 +1,20 @@
 import React, { useState } from 'react';
 import ResourceCard from '../components/ResourceCard';
-import { useResources } from '../services/Resource'; // Adjust relative path as needed
+import { useResources } from '../services/Resource';
 
 const CATEGORIES = ['Hardware', 'Electronics', 'Robotics', 'Software', 'Furniture', 'General'];
 
 export default function ResourceAdmin() {
-  const { 
-    resources = [], 
-    labsList = [], 
-    loading, 
-    error, 
-    refreshData, 
-    addResource, 
+  const {
+    resources = [],
+    labsList = [],
+    loading,
+    error,
+    refreshData,
+    addResource,
     assignToLab,
-    deleteResource, 
-    quickQuantityChange, 
+    deleteResource,
+    quickQuantityChange,
     unassignLab
   } = useResources();
 
@@ -24,7 +24,7 @@ export default function ResourceAdmin() {
 
   // Modal Control States
   const [activeModal, setActiveModal] = useState(null); // 'ADD' | 'ASSIGN' | null
-  const [currentResourceId, setCurrentResourceId] = useState(null); // Store ID instead of stale object
+  const [currentResourceId, setCurrentResourceId] = useState(null);
   const [submitError, setSubmitError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -40,12 +40,12 @@ export default function ResourceAdmin() {
     quantity: 1
   });
 
-  // Dynamically resolve live resource object from state to prevent stale modal data
+  // Dynamically resolve resource from state
   const currentResource = resources.find(
-    (r) => (r._id || r.id) === currentResourceId
+    (r) => String(r._id || r.id) === String(currentResourceId)
   );
 
-  // Calculate available reserve: Total Stock minus Assigned Resources
+  // GUARANTEED FORMULA: Available = Total Quantity - Sum(Assigned Lab Quantities)
   const getAvailableQuantity = (resource) => {
     if (!resource) return 0;
 
@@ -53,7 +53,7 @@ export default function ResourceAdmin() {
       const allocatedQty = Number(
         item?.assignedQuantity ?? item?.quantity ?? item?.count ?? 0
       );
-      return sum + allocatedQty;
+      return sum + (isNaN(allocatedQty) ? 0 : allocatedQty);
     }, 0);
 
     const available = Number(resource.totalQuantity || 0) - totalAllocated;
@@ -113,12 +113,9 @@ export default function ResourceAdmin() {
 
     try {
       await assignToLab(currentResourceId, assignForm.labId, Number(assignForm.quantity));
-      
-      // Explicitly pull fresh dataset across resources & labs
       if (typeof refreshData === 'function') {
         await refreshData();
       }
-
       setActiveModal(null);
       setCurrentResourceId(null);
     } catch (err) {

@@ -44,7 +44,7 @@ export function useLabs() {
         }
       };
 
-      const { data } = await axios.get(BACKEND_URL , config);
+      const { data } = await axios.get(`${BACKEND_URL}/labs`, config);
       setLabs(data);
       setError(null);
     } catch (err) {
@@ -66,7 +66,7 @@ export function useLabs() {
   // 2. Create Lab
   const createLab = async (labData) => {
     try {
-      const { data } = await axios.post(BACKEND_URL , labData, getAuthHeader());
+      const { data } = await axios.post(`${BACKEND_URL}/labs`, labData, getAuthHeader());
       setLabs((prev) => [data, ...prev]);
       return data;
     } catch (err) {
@@ -77,7 +77,7 @@ export function useLabs() {
   // 3. Update Lab
   const updateLab = async (id, labData) => {
     try {
-      const { data } = await axios.put(`${BACKEND_URL}/${id}`, labData, getAuthHeader());
+      const { data } = await axios.put(`${BACKEND_URL}/labs/${id}`, labData, getAuthHeader());
       setLabs((prev) =>
         prev.map((item) => (matchesId(item, id) ? data : item))
       );
@@ -90,7 +90,7 @@ export function useLabs() {
   // 4. Delete Lab
   const deleteLab = async (id) => {
     try {
-      await axios.delete(`${BACKEND_URL}/${id}`, getAuthHeader());
+      await axios.delete(`${BACKEND_URL}/labs/${id}`, getAuthHeader());
       setLabs((prev) => prev.filter((item) => !matchesId(item, id)));
     } catch (err) {
       throw new Error(getErrMsg(err));

@@ -39,13 +39,26 @@ const googleAuth = async (req, res) => {
     return res.status(400).json({ message: 'Authorization code is required' });
   }
 
+  // 🟢 Resolve redirect_uri safely
+  let targetRedirectUri = redirect_uri;
+
+  if (!targetRedirectUri) {
+    // If running locally without explicit client redirect_uri, fallback to local dev server
+    targetRedirectUri = process.env.NODE_ENV === 'production'
+      ? (process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : 'https://lab-dynamix.vercel.app')
+      : 'http://localhost:5173';
+  } else if (targetRedirectUri !== 'postmessage') {
+    // Strip accidental trailing slashes for standard URL matches
+    targetRedirectUri = targetRedirectUri.replace(/\/$/, '');
+  }
+
   try {
     // Swap code for access token
     const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
       code,
       client_id: process.env.GOOGLE_CLIENT_ID,
       client_secret: process.env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: redirect_uri || process.env.FRONTEND_URL,
+      redirect_uri: targetRedirectUri,
       grant_type: 'authorization_code',
     });
 
@@ -89,7 +102,7 @@ const googleAuth = async (req, res) => {
   } catch (error) {
     console.error('OAuth Exchange Failure:', error.response?.data || error.message);
     const googleErrorMsg =
-      error.response?.data?.error_description || 'Authentication handshake failed';
+      error.response?.data?.error_description || error.response?.data?.error || 'Authentication handshake failed';
     return res.status(500).json({ message: googleErrorMsg });
   }
 };
@@ -124,7 +137,6 @@ const createUser = async (req, res) => {
       return res.status(400).json({ message: 'Email is already registered.' });
     }
 
-    // Save user directly (Mongoose pre('save') hook hashes password)
     const user = await User.create({
       name,
       email: normalizedEmail,

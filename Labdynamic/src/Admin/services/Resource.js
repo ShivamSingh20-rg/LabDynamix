@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import {BACKEND_URL} from '../../pages/Api';
+import { BACKEND_URL } from '../../pages/Api';
+
 const API_BASE_URL = BACKEND_URL;
 
 const getAuthHeader = () => {
@@ -20,10 +21,27 @@ export function useResources() {
 
   const [category, setCategory] = useState('All');
   const [search, setSearch] = useState('');
-
+console.log("resources", resources);
   const getErrMsg = (err) =>
     err.response?.data?.message || err.message || 'An unexpected error occurred.';
 
+  // Fallback calculations on state level
+  const syncAvailableQuantity = (res) => {
+    const total = Number(res.totalQuantity) || 0;
+    const totalAssigned = (res.assignedLabs || []).reduce((sum, item) => {
+      const q = Number(
+        item?.assignedQuantity !== undefined
+          ? item.assignedQuantity
+          : (item?.quantity !== undefined ? item.quantity : 0)
+      );
+      return sum + (isNaN(q) ? 0 : q);
+    }, 0);
+    return {
+      ...res,
+      availableQuantity: Math.max(0, total - totalAssigned)
+    };
+    console.log('totalQuantity', res.totalQuantity, 'totalAssigned', res.assignedLabs, 'availableQuantity', Math.max(0, total - totalAssigned));
+  };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -42,8 +60,9 @@ export function useResources() {
         axios.get(`${API_BASE_URL}/labs`, getAuthHeader())
       ]);
 
-      setResources(resResponse.data);
-      setLabsList(labsResponse.data);
+      const formattedResources = (resResponse.data || []).map(syncAvailableQuantity);
+      setResources(formattedResources);
+      setLabsList(labsResponse.data || []);
     } catch (err) {
       setError(getErrMsg(err));
     } finally {
@@ -51,7 +70,6 @@ export function useResources() {
     }
   }, [search, category]);
 
-  // Debounced refetch whenever search or category changes
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchData();
@@ -60,7 +78,6 @@ export function useResources() {
     return () => clearTimeout(timer);
   }, [fetchData]);
 
-  // API Action Handlers
   const addResource = async (formData) => {
     try {
       const { data: createdResource } = await axios.post(
@@ -68,8 +85,9 @@ export function useResources() {
         formData,
         getAuthHeader()
       );
-      setResources((prev) => [...prev, createdResource]);
-      return createdResource;
+      const computed = syncAvailableQuantity(createdResource);
+      setResources((prev) => [...prev, computed]);
+      return computed;
     } catch (err) {
       const msg = getErrMsg(err);
       alert(msg);
@@ -84,10 +102,11 @@ export function useResources() {
         formData,
         getAuthHeader()
       );
+      const computed = syncAvailableQuantity(updated);
       setResources((prev) =>
-        prev.map((r) => (String(r.id || r._id) === String(id) ? updated : r))
+        prev.map((r) => (String(r.id || r._id) === String(id) ? computed : r))
       );
-      return updated;
+      return computed;
     } catch (err) {
       const msg = getErrMsg(err);
       alert(msg);
@@ -95,7 +114,6 @@ export function useResources() {
     }
   };
 
-  // Quick Quantity Change (+ / -) Handler
   const quickQuantityChange = async (target, delta) => {
     const resourceObj =
       typeof target === 'object'
@@ -107,13 +125,12 @@ export function useResources() {
     const currentTotal = Number(resourceObj.totalQuantity) || 0;
     const newTotal = currentTotal + delta;
 
-    if (newTotal < 0) return; // Prevent negative stock
+    if (newTotal < 0) return;
 
-    // Optimistic UI update
     setResources((prev) =>
       prev.map((r) =>
         String(r.id || r._id) === String(resId)
-          ? { ...r, totalQuantity: newTotal }
+          ? syncAvailableQuantity({ ...r, totalQuantity: newTotal })
           : r
       )
     );
@@ -124,15 +141,15 @@ export function useResources() {
         { totalQuantity: newTotal },
         getAuthHeader()
       );
+      const computed = syncAvailableQuantity(updated);
       setResources((prev) =>
-        prev.map((r) => (String(r.id || r._id) === String(resId) ? updated : r))
+        prev.map((r) => (String(r.id || r._id) === String(resId) ? computed : r))
       );
     } catch (err) {
-      // Rollback on failure
       setResources((prev) =>
         prev.map((r) =>
           String(r.id || r._id) === String(resId)
-            ? { ...r, totalQuantity: currentTotal }
+            ? syncAvailableQuantity({ ...r, totalQuantity: currentTotal })
             : r
         )
       );
@@ -154,35 +171,31 @@ export function useResources() {
     }
   };
 
-  // Fixed Assign Handler
-  // Inside useResources hook
-const assignToLab = async (resourceId, labId, quantity) => {
-  try {
-    const { data: updatedResource } = await axios.post(
-      `${API_BASE_URL}/resources/${resourceId}/assign`,
-      {
-        labId,                               // Matches schema key 'labId'
-        assignedQuantity: Number(quantity)   // Renamed from 'quantity' -> 'assignedQuantity'
-      },
-      getAuthHeader()
-    );
+  const assignToLab = async (resourceId, labId, quantity) => {
+    try {
+      const { data: updatedResource } = await axios.post(
+        `${API_BASE_URL}/resources/${resourceId}/assign`,
+        {
+          labId,
+          assignedQuantity: Number(quantity),
+          quantity: Number(quantity)
+        },
+        getAuthHeader()
+      );
 
-    // Update local state with returned populated object
-    setResources((prev) =>
-      prev.map((r) =>
-        String(r.id || r._id) === String(resourceId) ? updatedResource : r
-      )
-    );
+      const computed = syncAvailableQuantity(updatedResource);
+      setResources((prev) =>
+        prev.map((r) => (String(r.id || r._id) === String(resourceId) ? computed : r))
+      );
 
-    return updatedResource;
-  } catch (err) {
-    const msg = getErrMsg(err);
-    alert(msg);
-    throw new Error(msg);
-  }
-};
+      return computed;
+    } catch (err) {
+      const msg = getErrMsg(err);
+      alert(msg);
+      throw new Error(msg);
+    }
+  };
 
-  // Flexible Unassign Handler
   const unassignLab = async (arg1, arg2) => {
     let targetResourceId;
     let targetLabId;
@@ -208,14 +221,14 @@ const assignToLab = async (resourceId, labId, quantity) => {
         `${API_BASE_URL}/resources/${targetResourceId}/unassign/${targetLabId}`,
         getAuthHeader()
       );
+
+      const computed = syncAvailableQuantity(updatedResource);
       setResources((prev) =>
         prev.map((r) =>
-          String(r.id || r._id) === String(targetResourceId)
-            ? updatedResource
-            : r
+          String(r.id || r._id) === String(targetResourceId) ? computed : r
         )
       );
-      return updatedResource;
+      return computed;
     } catch (err) {
       const msg = getErrMsg(err);
       alert(msg);
