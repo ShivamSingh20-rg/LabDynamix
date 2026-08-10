@@ -197,77 +197,79 @@ export default function ResourceDetailPage() {
   }, [currentDate, activeSlotId, activeSlotLabel, targetResourceId, labAssignedQuantity]);
 
   const handleConfirmBooking = async () => {
-    if (!currentDate || !currentSlot) {
-      const msg = 'Please select both a date and a time slot.';
-      setBookingStatus({ type: 'error', message: msg });
-      toast.error(msg);
-      return;
+  if (!currentDate || !currentSlot) {
+    const msg = 'Please select both a date and a time slot.';
+    setBookingStatus({ type: 'error', message: msg });
+    toast.error(msg);
+    return;
+  }
+
+  if (!purpose.trim()) {
+    const msg = 'Please enter the purpose of your booking.';
+    setBookingStatus({ type: 'error', message: msg });
+    toast.error(msg);
+    return;
+  }
+
+  if (availableCount === 0) {
+    const msg = 'This slot is fully booked for this lab. Please select another slot.';
+    setBookingStatus({ type: 'error', message: msg });
+    toast.error(msg);
+    return;
+  }
+
+  try {
+    setIsSubmitting(true);
+    setBookingStatus({ type: null, message: '' });
+
+    // 💡 Read 'labToken' and 'labUser' (with fallback to legacy keys)
+    const token = localStorage.getItem('labToken') || localStorage.getItem('token');
+    const storedUser = JSON.parse(
+      localStorage.getItem('labUser') || localStorage.getItem('user') || '{}'
+    );
+    const userId = storedUser._id || storedUser.id || null;
+
+    const response = await fetch(`${BACKEND_URL}/bookings/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({
+        user: userId,
+        resourceId: targetResourceId,
+        labId: labDetails?._id || primaryAssignedLab?.labId?._id || primaryAssignedLab?.labId,
+        dateISO: currentDate,
+        slotId: slotObj.id,
+        label: slotObj.label || slotObj,
+        startHour: slotObj.startHour || 9,
+        purpose: purpose.trim(),
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const errorMsg = data.message || 'Booking failed. Please try again.';
+      toast.error(errorMsg);
+      throw new Error(errorMsg);
     }
 
-    if (!purpose.trim()) {
-      const msg = 'Please enter the purpose of your booking.';
-      setBookingStatus({ type: 'error', message: msg });
-      toast.error(msg);
-      return;
-    }
+    toast.success('Booking confirmed successfully!');
+    setBookingStatus({
+      type: 'success',
+      message: 'Booking successful! Redirecting to your bookings...',
+    });
 
-    if (availableCount === 0) {
-      const msg = 'This slot is fully booked for this lab. Please select another slot.';
-      setBookingStatus({ type: 'error', message: msg });
-      toast.error(msg);
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      setBookingStatus({ type: null, message: '' });
-
-      const token = localStorage.getItem('token');
-      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const userId = storedUser._id || storedUser.id || null;
-
-      const response = await fetch(`${BACKEND_URL}/bookings/create`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: token ? `Bearer ${token}` : '',
-        },
-        body: JSON.stringify({
-          user: userId,
-          resourceId: targetResourceId,
-          labId: labDetails?._id || primaryAssignedLab?.labId?._id || primaryAssignedLab?.labId,
-          dateISO: currentDate,
-          slotId: slotObj.id,
-          label: slotObj.label || slotObj,
-          startHour: slotObj.startHour || 9,
-          purpose: purpose.trim(),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errorMsg = data.message || 'Booking failed. Please try again.';
-        toast.error(errorMsg);
-        throw new Error(errorMsg);
-      }
-
-      toast.success('Booking confirmed successfully!');
-      setBookingStatus({
-        type: 'success',
-        message: 'Booking successful! Redirecting to your bookings...',
-      });
-
-      setTimeout(() => {
-        navigate('/my-bookings');
-      }, 1200);
-    } catch (err) {
-      setBookingStatus({ type: 'error', message: err.message });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
+    setTimeout(() => {
+      navigate('/my-bookings');
+    }, 1200);
+  } catch (err) {
+    setBookingStatus({ type: 'error', message: err.message });
+  } finally {
+    setIsSubmitting(false);
+  }
+};
   const {
     name = 'Resource Name',
     category = 'Equipment',

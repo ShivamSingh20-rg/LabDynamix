@@ -29,7 +29,7 @@ export default function BookingDetailsPage() {
       setLoading(true);
       setError(null);
 
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('labToken');
 
       const response = await fetch(`${BACKEND_URL}/bookings/${bookingId}`, {
         signal,
@@ -63,7 +63,7 @@ export default function BookingDetailsPage() {
 
   const handleCancelBooking = async (bookingId) => {
   try {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('labToken');
     const response = await fetch(`${BACKEND_URL}/bookings/${bookingId}/cancel`, {
       method: 'PUT',
       headers: {

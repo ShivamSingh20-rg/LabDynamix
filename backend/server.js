@@ -11,19 +11,21 @@ const { initCronJobs } = require('./config/cronService');
 const userRoutes = require('./Routes/Admin.user.route');
 const notificationRoutes = require('./Routes/notification.route');
 const bookingRoutes = require('./Routes/booking.route');
+const facultyRoutes = require('./Routes/Faculty.route')
 const app = express();
 
-// Database Connection
+ 
 connectDB();
 
-app.use(cors({ origin: process.env.FRONTEND_URL }));
+app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
 app.use(express.json());
 
 // 1. Create HTTP Server
 const server = http.createServer(app);
 
-// 2. Attach Socket.io to HTTP Server
-initSocket(server);
+// 2. Attach Socket.io & bind to Express app
+const io = initSocket(server);
+app.set('io', io);  
 
 initCronJobs();
 
@@ -34,6 +36,7 @@ app.use('/api/resources', resourceRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/faculty', facultyRoutes);
 // Root Health Check
 app.get('/', (req, res) => {
   res.send('LabDynamix API Engine is running...');
@@ -41,5 +44,5 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-// ✅ FIXED: Listen on `server`, NOT `app`
+// Listen on `server`, NOT `app`
 server.listen(PORT, () => console.log(`🚀 Server & Socket.io listening on port ${PORT}`));

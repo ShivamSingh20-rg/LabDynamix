@@ -4,12 +4,12 @@ import { NavLink } from 'react-router-dom'; // 1. Import NavLink
 export default function Sidebar() {
   // 2. Add the 'path' property to each menu item
   const menuItems = [
-    { id: 'timeline', label: 'Dashboard', icon: '📊', path: '/dashboard' },
+    { id: 'timeline', label: 'Dashboard', icon: '📊', path: '/student/dashboard' },
     { id: 'equipments', label: 'Resources', icon: '🔬', path: '/resources' },
     { id: 'my-bookings', label: 'My Bookings', icon: '🎟️', path: '/my-bookings' },
-    { id: 'calendar', label: 'Calendar', icon: '📅', path: '/calendar' },
+    { id: 'schedule', label: 'Schedule', icon: '📅', path: '/calendar' },
     { id: 'notifications', label: 'Notifications', icon: '🔔', path: '/notifications' },
-    { id: 'settings', label: 'Settings', icon: '⚙️', path: '/settings' },
+   
   ];
 
   return (

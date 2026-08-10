@@ -24,15 +24,15 @@ export default function FacultySidebar({ user, handleLogout }) {
       items: [
         { path: '/faculty/book-lab', label: 'Book Lab/Auditorium', icon: '🔷' },
         { path: '/faculty/requests', label: 'Booking Requests', icon: '📋' },
-        { path: '/faculty/approved-bookings', label: 'Approved Bookings', icon: '📅' },
-        { path: '/faculty/calendar', label: 'Lab Calendar', icon: '📆' },
+        { path: '/faculty/approved', label: 'Approved Bookings', icon: '📅' },
+        { path: '/faculty/calendar', label: 'Lab Schedule', icon: '📆' },
       ],
     },
     {
       title: 'SYSTEM',
       items: [
         { path: '/faculty/notifications', label: 'Notifications', icon: '🔔' },
-        { path: '/faculty/settings', label: 'Settings', icon: '⚙️' },
+ 
       ],
     },
   ];

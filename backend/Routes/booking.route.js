@@ -7,7 +7,8 @@ const {
   getMyBookings,
   getFacultyBookings,
   getBookingById,
-  cancelBooking
+  cancelBooking,
+  getStudentSummary 
 } = require('../controllers/Booking.controller');
 
 // Import authentication & role middleware
@@ -20,7 +21,7 @@ router.use(verifyAppToken);
 
 // GET /api/bookings/my-bookings
 router.get('/my-bookings', getMyBookings);
-
+router.get('/student-summary', getStudentSummary);
 // GET /api/bookings/faculty/all
 router.get('/faculty/all', authorizeRoles('faculty', 'admin'), getFacultyBookings);
 

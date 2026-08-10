@@ -1,49 +1,76 @@
 const User = require('../models/User');
 const axios = require('axios');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
+// Centralized JWT Token Generator
+const generateToken = (user) => {
+  const secret = process.env.JWT_SECRET || 'your_fallback_secret_key';
+  return jwt.sign(
+    {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      department: user.department || user.category || null,
+    },
+    secret,
+    { expiresIn: '7d' }
+  );
+};
 
- 
+// Standardized User Payload Formatter
+const formatUserResponse = (user) => ({
+  id: user._id,
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  department: user.department || user.category || '',
+  category: user.category || '',
+  status: user.status || 'Active',
+  avatar: user.avatar || '',
+});
+
+// 1. GOOGLE OAUTH LOGIN / REGISTER
 const googleAuth = async (req, res) => {
-  const { code, redirect_uri } = req.body; // Accept redirect_uri from frontend dynamically if needed
+  const { code, redirect_uri } = req.body;
 
   if (!code) {
     return res.status(400).json({ message: 'Authorization code is required' });
   }
 
   try {
-    // 1. Swap authorization code for access token with Google API
+    // Swap code for access token
     const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
       code,
       client_id: process.env.GOOGLE_CLIENT_ID,
       client_secret: process.env.GOOGLE_CLIENT_SECRET,
-      // Fallback to process.env.FRONTEND_URL if not passed from frontend
-      redirect_uri: redirect_uri || process.env.FRONTEND_URL, 
-      grant_type: 'authorization_code'
+      redirect_uri: redirect_uri || process.env.FRONTEND_URL,
+      grant_type: 'authorization_code',
     });
 
     const { access_token } = tokenResponse.data;
 
-    // 2. Fetch user profile data from Google using the access token
+    // Fetch Google profile
     const userProfileResponse = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { Authorization: `Bearer ${access_token}` }
+      headers: { Authorization: `Bearer ${access_token}` },
     });
 
     const profile = userProfileResponse.data;
+    const normalizedEmail = profile.email.toLowerCase();
 
-    // 3. Find existing user or create a new one in MongoDB
-    let user = await User.findOne({ email: profile.email.toLowerCase() });
+    let user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
+      // Pass raw random string so pre('save') hook hashes it once
+      const randomPassword = Math.random().toString(36).slice(-10) + 'A1!';
       user = new User({
-        email: profile.email.toLowerCase(),
+        email: normalizedEmail,
         name: profile.name,
         avatar: profile.picture,
         role: 'Student',
         status: 'Active',
-        // Provide a dummy hash if your schema enforces a password requirement
-        password: await bcrypt.hash(Math.random().toString(36).slice(-8), 10) 
+        password: randomPassword,
       });
       await user.save();
     }
@@ -52,102 +79,76 @@ const googleAuth = async (req, res) => {
       return res.status(403).json({ message: 'Your account has been blocked.' });
     }
 
-    // 4. Sign standard application JWT
-    const appToken = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.JWT_SECRET || 'fallback_secret',
-      { expiresIn: '7d' }
-    );
+    const appToken = generateToken(user);
 
-    // 5. Return standardized payload matching loginUser/createUser
-    res.json({
+    return res.json({
       message: 'Google login successful',
       token: appToken,
-      user: {
-        id: user._id,
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar,
-        role: user.role,
-        status: user.status || 'Active'
-      }
+      user: formatUserResponse(user),
     });
-
   } catch (error) {
-    // Log details to identify Google API issues clearly
-    console.error("OAuth Exchange Failure:", error.response?.data || error.message);
-    
-    const googleErrorMsg = error.response?.data?.error_description || 'Authentication handshake failed';
-    res.status(500).json({ message: googleErrorMsg });
+    console.error('OAuth Exchange Failure:', error.response?.data || error.message);
+    const googleErrorMsg =
+      error.response?.data?.error_description || 'Authentication handshake failed';
+    return res.status(500).json({ message: googleErrorMsg });
   }
 };
- 
+
+// 2. GET CURRENT LOGGED-IN USER
 const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-__v');
+    const user = await User.findById(req.user.id).select('-password -__v');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    res.json(user);
+    return res.json(formatUserResponse(user));
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('getMe Error:', error);
+    return res.status(500).json({ message: 'Server error' });
   }
 };
- 
+
+// 3. CREATE USER (REGISTER)
 const createUser = async (req, res) => {
   try {
-    // 1. Destructure category and role along with required fields
-    const { name, email, password, role, category } = req.body;
+    const { name, email, password, role, category, department } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'All required fields must be provided.' });
     }
 
-    // 2. Check if user already exists
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
       return res.status(400).json({ message: 'Email is already registered.' });
     }
 
-    // 3. Save user directly (Mongoose pre('save') hook handles password hashing)
+    // Save user directly (Mongoose pre('save') hook hashes password)
     const user = await User.create({
       name,
-      email: email.toLowerCase(),
-      password, // Passed raw so pre('save') hashes it ONCE
-      role: role || 'Student', // Uses selected role instead of hardcoding
-      category: category || '', // Persists the category
-      status: 'Active' // Explicitly sets initial active status
+      email: normalizedEmail,
+      password,
+      role: role || 'Student',
+      category: category || department || '',
+      department: department || category || '',
+      status: 'Active',
     });
 
-    // 4. Generate JWT
-    const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.JWT_SECRET || 'fallback_secret',
-      { expiresIn: '7d' }
-    );
+    const token = generateToken(user);
 
-    // 5. Send complete user payload to frontend
-    res.status(201).json({
+    return res.status(201).json({
       message: 'User created successfully',
       token,
-      user: {
-        id: user._id,
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        category: user.category,
-        status: user.status
-      }
+      user: formatUserResponse(user),
     });
   } catch (err) {
-    console.error("Error creating user:", err);
-    res.status(500).json({ message: err.message || 'Internal Server Error' });
+    console.error('Error creating user:', err);
+    return res.status(500).json({ message: err.message || 'Internal Server Error' });
   }
 };
- 
 
+// 4. LOGIN USER
 const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -158,11 +159,7 @@ const loginUser = async (req, res) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Fetch user and explicitly select hidden password field
     const user = await User.findOne({ email: normalizedEmail }).select('+password');
-
-    
-    
 
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password.' });
@@ -172,31 +169,18 @@ const loginUser = async (req, res) => {
       return res.status(403).json({ message: 'Your account has been blocked.' });
     }
 
-    // Compare raw password against stored hash using the method on your schema
     const isPasswordMatch = await user.matchPassword(password);
-    
-     
+
     if (!isPasswordMatch) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
-    const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.JWT_SECRET || 'your_fallback_secret',
-      { expiresIn: '7d' }
-    );
+    const token = generateToken(user);
 
     return res.status(200).json({
       message: 'Login successful',
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        category: user.category || '',
-        status: user.status || 'Active'
-      },
+      user: formatUserResponse(user),
     });
   } catch (error) {
     console.error('Login Error:', error);
@@ -208,5 +192,5 @@ module.exports = {
   googleAuth,
   getMe,
   createUser,
-  loginUser
+  loginUser,
 };

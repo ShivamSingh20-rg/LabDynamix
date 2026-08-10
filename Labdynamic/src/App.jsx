@@ -2,7 +2,7 @@ import React from 'react';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-
+import StudentDashboard from './pages/StudentDashboard';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';      
 import AdminSidebar from './Admin/AdminSidebar';   
@@ -15,10 +15,13 @@ import FacultyDashboard from "./Faculty/pages/FacultyDash";
 import Loginpage from "./pages/Loginpage";
 import NotificationBell from "./components/Notification";
 import Lab from "./Admin/pages/Lab";
+import FacultyApprovedBookings from "./Faculty/pages/facultyapproved";
 import ResourceDetails from "./pages/ResourceDetailpage";
 import FacultyLab from "./Faculty/pages/FacultyLabs";
 import BookingDetail from "./pages/BookingDetail";
 import MyBookings from "./pages/MyBooking";
+import FacultyNOtifications from "./Faculty/pages/Notification";
+import StudentBookingRequest from "./Faculty/pages/Bookingrequest";
 import { useAuth } from './context/Authcontext'; 
 
 export default function App() {
@@ -86,7 +89,7 @@ export default function App() {
             {/* Support both singular and plural paths to prevent redirect wipes */}
             <Route path="/resource/:id" element={<ResourceDetails user={user} />} />
             <Route path="/resources/:id" element={<ResourceDetails user={user} />} />
-            
+            <Route path="/student/dashboard" element={<StudentDashboard user={user} />} />
             <Route path="/notifications" element={<NotificationBell />} />
             <Route path="/my-bookings" element={<MyBookings user={user} />} />
 
@@ -100,7 +103,16 @@ export default function App() {
               path="/faculty/my-labs" 
               element={isFaculty ? <FacultyLab user={user} /> : <Navigate to="/" replace />} 
             />
-
+            <Route 
+              path="/faculty/requests" 
+              element={isFaculty ? <StudentBookingRequest user={user} /> : <Navigate to="/" replace />} />
+<Route path="/faculty/approved" 
+              element={isFaculty ? <FacultyApprovedBookings user={user} /> : <Navigate to="/" replace />} 
+            />
+            <Route 
+              path="/faculty/notifications" 
+              element={isFaculty ? <FacultyNOtifications user={user} /> : <Navigate to="/" replace />} 
+            />
             {/* Admin Protected Routes */}
             <Route 
               path="/admin/dashboard" 

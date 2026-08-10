@@ -210,7 +210,6 @@ exports.updateResource = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Fixed deprecation warning: replacement of { new: true } with { returnDocument: 'after' }
     const updatedResource = await Resource.findByIdAndUpdate(
       id,
       { $set: req.body },
@@ -221,9 +220,27 @@ exports.updateResource = async (req, res) => {
       return res.status(404).json({ message: 'Resource not found' });
     }
 
-    res.status(200).json(updatedResource);
+    // ⚡ Real-Time Socket Broadcast to Room
+    try {
+      const io = req.app.get('io') || (typeof getIO === 'function' ? getIO() : null);
+
+      if (io) {
+        // Emit slot_updated with fresh updatedResource data payload
+        io.to(`resource_${String(id)}`).emit('slot_updated', {
+          resourceId: String(id),
+          updatedResource,
+        });
+
+        // Optional: General resource update event
+        io.to(`resource_${String(id)}`).emit('resource_updated', updatedResource);
+      }
+    } catch (socketErr) {
+      console.warn('Socket notification error in updateResource:', socketErr.message);
+    }
+
+    return res.status(200).json(updatedResource);
   } catch (error) {
-    res.status(500).json({ message: error.message || 'Failed to update resource' });
+    return res.status(500).json({ message: error.message || 'Failed to update resource' });
   }
 };
 

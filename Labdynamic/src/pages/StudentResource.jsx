@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import axios from 'axios';
 import { useResources } from '../Admin/services/Resource';
 import StudentResourceCard from '../components/StudentResourcecard';
 
@@ -11,13 +12,39 @@ function getAvailableCount(res) {
 }
 
 export default function StudentResourcePage() {
-  const { resources = [], labsList = [], loading, error } = useResources();
+  const { resources = [], labsList = [], loading, error, refetchResources } = useResources();
 
   // Local Filter States
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [selectedLab, setSelectedLab] = useState('All');
   const [availability, setAvailability] = useState('All');
+
+  // Track User's Active Bookings & Processing State
+  const [userBookings, setUserBookings] = useState([]);
+  const [bookingLoading, setBookingLoading] = useState(false);
+
+  // Fetch current user's existing bookings on mount
+  useEffect(() => {
+    const fetchUserBookings = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        const res = await axios.get('http://localhost:5000/api/bookings/my-bookings', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.data?.success || Array.isArray(res.data)) {
+          setUserBookings(res.data.bookings || res.data || []);
+        }
+      } catch (err) {
+        console.warn('Could not load user bookings:', err.message);
+      }
+    };
+
+    fetchUserBookings();
+  }, []);
 
   // Reset Filters Helper
   const handleResetFilters = () => {
@@ -55,11 +82,10 @@ export default function StudentResourcePage() {
         category === 'All' ||
         String(res.category || '').toLowerCase().trim() === String(category).toLowerCase().trim();
 
-      // 3. Option 1: Match Resource via Lab's assignedResources Array
+      // 3. Match Resource via Lab
       let matchesLab = selectedLab === 'All';
 
       if (!matchesLab) {
-        // Find the selected lab object in labsList matching selectedLab ID or Name
         const activeLabObj = (labsList || []).find((l) => {
           const lId = String(l._id || l.id || '').toLowerCase().trim();
           const lName = String(l.name || l.labName || '').toLowerCase().trim();
@@ -68,14 +94,12 @@ export default function StudentResourcePage() {
         });
 
         if (activeLabObj && Array.isArray(activeLabObj.assignedResources)) {
-          // Check if current resource name exists inside this lab's assignedResources
           matchesLab = activeLabObj.assignedResources.some(
             (assignedItem) =>
               String(assignedItem.name || '').toLowerCase().trim() ===
               String(res.name || '').toLowerCase().trim()
           );
         } else {
-          // Fallback if resource happens to carry a direct lab property
           const resLabId = typeof res.lab === 'object' ? res.lab?._id : res.lab || res.labId;
           const resLabName = typeof res.lab === 'object' ? res.lab?.name : res.labName;
           const targetLab = String(selectedLab).toLowerCase().trim();
@@ -122,9 +146,83 @@ export default function StudentResourcePage() {
   const hasActiveFilters =
     search !== '' || category !== 'All' || selectedLab !== 'All' || availability !== 'All';
 
-  const handleBookingSubmit = (resource, slot) => {
-    const slotDetail = typeof slot === 'object' ? slot.time || slot.label || slot.id : slot;
-    alert(`Booking requested for "${resource.name}" during slot: ${slotDetail}`);
+  // 🔒 BOOKING SUBMISSION HANDLER WITH DUPLICATE CHECK
+  const handleBookingSubmit = async (resource, slot) => {
+    const slotIdOrLabel = typeof slot === 'object' ? slot.id || slot.time || slot.label : slot;
+    const resourceId = resource._id || resource.id;
+
+    // 1. Client-Side Check: Verify if user already booked this exact resource & slot
+    const isAlreadyBookedByUser = userBookings.some((b) => {
+      const bResId = typeof b.resource === 'object' ? b.resource?._id || b.resource?.id : b.resource || b.resourceId;
+      const bSlot = typeof b.slot === 'object' ? b.slot?.id || b.slot?.time || b.slot?.label : b.slot || b.timeSlot;
+      const bStatus = String(b.status || '').toLowerCase();
+
+      return (
+        String(bResId) === String(resourceId) &&
+        String(bSlot).trim() === String(slotIdOrLabel).trim() &&
+        bStatus !== 'cancelled' &&
+        bStatus !== 'rejected'
+      );
+    });
+
+    if (isAlreadyBookedByUser) {
+      alert(`You have already booked "${resource.name}" for slot (${slotIdOrLabel}). Multiple bookings for the same slot are not allowed.`);
+      return;
+    }
+
+    // 2. Client-Side Check: Ensure slot isn't marked as booked by someone else
+    if (typeof slot === 'object' && (slot.isBooked || slot.status === 'Booked' || slot.available === false)) {
+      alert(`This time slot (${slotIdOrLabel}) is already booked by another user. Please choose a different slot.`);
+      return;
+    }
+
+    // 3. Submit Booking Request to Server
+    try {
+      setBookingLoading(true);
+      const token = localStorage.getItem('token');
+
+      const response = await axios.post(
+        'http://localhost:5000/api/bookings',
+        {
+          resourceId,
+          slot: slotIdOrLabel,
+          date: new Date().toISOString().split('T')[0], // current date or selected date
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.data.success || response.status === 201) {
+        alert(`Success! Booking confirmed for "${resource.name}" at slot: ${slotIdOrLabel}`);
+
+        // Append new booking locally to prevent instant re-click
+        const newBookingObj = response.data.booking || {
+          resource: resourceId,
+          slot: slotIdOrLabel,
+          status: 'pending',
+        };
+        setUserBookings((prev) => [...prev, newBookingObj]);
+
+        // Trigger refetch if helper exists
+        if (typeof refetchResources === 'function') {
+          refetchResources();
+        }
+      }
+    } catch (err) {
+      console.error('Booking submission error:', err);
+      const errorMessage =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        'This slot has already been reserved or is unavailable.';
+
+      alert(`Booking Failed: ${errorMessage}`);
+    } finally {
+      setBookingLoading(false);
+    }
   };
 
   if (loading) {
@@ -180,7 +278,6 @@ export default function StudentResourcePage() {
       {/* Filter Toolbar */}
       <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 mb-6 shadow-sm space-y-3">
         <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
-          
           {/* Search Input */}
           <div className="relative flex-1 w-full">
             <input
@@ -204,7 +301,6 @@ export default function StudentResourcePage() {
 
           {/* Select Filters Group */}
           <div className="w-full md:w-auto flex flex-wrap gap-2.5 items-center">
-            
             {/* Category Filter */}
             <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-2.5 py-1.5 rounded-lg">
               <span className="text-[11px] text-slate-500 font-medium">Category:</span>
@@ -234,9 +330,9 @@ export default function StudentResourcePage() {
                   const labValue = lab._id || lab.id || lab.name;
                   const labLabel = lab.name || 'Unnamed Lab';
                   return (
-                    <option 
-                      key={String(labValue)} 
-                      value={String(labValue)} 
+                    <option
+                      key={String(labValue)}
+                      value={String(labValue)}
                       className="bg-slate-900 text-slate-200"
                     >
                       {labLabel}
@@ -279,7 +375,46 @@ export default function StudentResourcePage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredResources.map((resource) => {
             const availableCount = getAvailableCount(resource);
-            
+            const rawSlots =
+              Array.isArray(resource.timeSlots) && resource.timeSlots.length > 0
+                ? resource.timeSlots
+                : Array.isArray(resource.slots) && resource.slots.length > 0
+                ? resource.slots
+                : [];
+
+            // Decorate slots with booking statuses for StudentResourceCard rendering
+            const decoratedSlots = rawSlots.map((slot) => {
+              const slotVal = typeof slot === 'object' ? slot.id || slot.time || slot.label : slot;
+
+              const isUserBooked = userBookings.some((b) => {
+                const bResId = typeof b.resource === 'object' ? b.resource?._id || b.resource?.id : b.resource || b.resourceId;
+                const bSlot = typeof b.slot === 'object' ? b.slot?.id || b.slot?.time || b.slot?.label : b.slot || b.timeSlot;
+                const bStatus = String(b.status || '').toLowerCase();
+
+                return (
+                  String(bResId) === String(resource._id || resource.id) &&
+                  String(bSlot).trim() === String(slotVal).trim() &&
+                  bStatus !== 'cancelled' &&
+                  bStatus !== 'rejected'
+                );
+              });
+
+              if (typeof slot === 'object') {
+                return {
+                  ...slot,
+                  isBooked: slot.isBooked || isUserBooked,
+                  isUserBooked,
+                };
+              }
+
+              return {
+                id: slotVal,
+                label: slotVal,
+                isBooked: isUserBooked,
+                isUserBooked,
+              };
+            });
+
             return (
               <StudentResourceCard
                 key={resource._id || resource.id}
@@ -287,13 +422,10 @@ export default function StudentResourcePage() {
                   ...resource,
                   availableQuantity: availableCount,
                   totalQuantity: resource.totalQuantity || 0,
-                  timeSlots: Array.isArray(resource.timeSlots) && resource.timeSlots.length > 0
-                    ? resource.timeSlots 
-                    : Array.isArray(resource.slots) && resource.slots.length > 0
-                    ? resource.slots
-                    : []
+                  timeSlots: decoratedSlots,
                 }}
                 onBook={handleBookingSubmit}
+                disabled={bookingLoading}
               />
             );
           })}

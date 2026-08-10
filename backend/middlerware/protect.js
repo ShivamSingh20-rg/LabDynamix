@@ -15,16 +15,21 @@ const verifyAppToken = (req, res, next) => {
   }
 
   try {
-    // Fallback secret ensures process doesn't throw 500 if env variable is missing
     const secret = process.env.JWT_SECRET || 'your_fallback_secret_key';
     const verified = jwt.verify(token, secret);
 
-    // Map properties safely (handles both verified.id and verified._id)
+    const userId = verified.id || verified._id;
+    const userCategory = verified.category || verified.department || null;
+
+    // Map properties safely (including category for socket/controller routing)
     req.user = {
-      id: verified.id || verified._id,
+      id: userId,
+      _id: userId,
       name: verified.name,
       email: verified.email,
-      role: verified.role
+      role: verified.role,
+      category: userCategory,
+      department: userCategory, // Backward compatibility fallback
     };
 
     next();
@@ -34,16 +39,22 @@ const verifyAppToken = (req, res, next) => {
   }
 };
 
-// Flexible Role Authorization Guard
+// Flexible Role Authorization Guard (Case-Insensitive & Trimmed)
 const authorizeRoles = (...allowedRoles) => {
   return (req, res, next) => {
     if (!req.user || !req.user.role) {
       return res.status(403).json({ message: 'Forbidden: User identity or role missing.' });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const userRole = String(req.user.role).trim().toLowerCase();
+    const normalizedAllowedRoles = allowedRoles.map((role) => String(role).trim().toLowerCase());
+
+    if (!normalizedAllowedRoles.includes(userRole)) {
+      console.warn(
+        `⛔ [403 BLOCKED] User ID: ${req.user.id} | Token Role: "${req.user.role}" | Required: [${allowedRoles.join(', ')}]`
+      );
       return res.status(403).json({
-        message: `Forbidden: Access requires one of the following roles: [${allowedRoles.join(', ')}]`
+        message: `Forbidden: Access requires one of: [${allowedRoles.join(', ')}]`,
       });
     }
 
@@ -53,5 +64,5 @@ const authorizeRoles = (...allowedRoles) => {
 
 module.exports = {
   verifyAppToken,
-  authorizeRoles
+  authorizeRoles,
 };

@@ -1,68 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { io } from 'socket.io-client';
-import { useAuth } from '../context/Authcontext';
-
-const SOCKET_URL = 'http://localhost:5000';
+import { useSocket } from '../context/SocketContext';  
 
 export default function NotificationBell() {
   const navigate = useNavigate();
-  const auth = useAuth() || {};
-  const user = auth.user;
-  const userId = user?._id || user?.id;
-
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const [isOpen, setIsOpen] = useState(false);
+ 
+  const { notifications, unreadCount, markAsRead } = useSocket();
 
-  // 1. Fetch initial notifications from database
-  useEffect(() => {
-    if (!userId) return;
-
-    const token = localStorage.getItem('token');
-
-    fetch(`${SOCKET_URL}/api/notifications?userId=${userId}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      }
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.notifications) {
-          setNotifications(data.notifications);
-          const count = data.notifications.filter((n) => !n.read).length;
-          setUnreadCount(count);
-        }
-      })
-      .catch((err) => console.error('Error fetching notifications:', err));
-  }, [userId]);
-
-  // 2. Real-time Socket.io listener
-  useEffect(() => {
-    if (!userId) return;
-
-    const socket = io(SOCKET_URL, {
-      query: { userId: String(userId) },
-      transports: ['websocket', 'polling']
-    });
-
-    socket.on('connect', () => {
-      socket.emit('joinRoom', `user_${userId}`);
-    });
-
-    socket.on('notification_received', (newNotif) => {
-      setNotifications((prev) => [newNotif, ...prev]);
-      setUnreadCount((prev) => prev + 1);
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, [userId]);
-
-  // 3. Close dropdown when clicking outside
+  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -73,28 +20,9 @@ export default function NotificationBell() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Mark single notification as read
-  const handleMarkAsRead = async (id, currentReadStatus) => {
-    if (currentReadStatus) return;
-
-    const token = localStorage.getItem('token');
-
-    // Optimistic UI update
-    setNotifications((prev) =>
-      prev.map((n) => (n._id === id ? { ...n, read: true } : n))
-    );
-    setUnreadCount((prev) => Math.max(0, prev - 1));
-
-    try {
-      await fetch(`${SOCKET_URL}/api/notifications/${id}/read`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        }
-      });
-    } catch (err) {
-      console.error('Failed to mark notification as read:', err);
+  const handleNotificationClick = (id, readStatus) => {
+    if (!readStatus) {
+      markAsRead(id);
     }
   };
 
@@ -102,6 +30,7 @@ export default function NotificationBell() {
     <div className="relative" ref={dropdownRef}>
       {/* Bell Icon Button */}
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
         title="Notifications"
         className="relative p-2 text-gray-400 hover:text-gray-100 bg-[#161b2c] hover:bg-gray-800 border border-gray-800 rounded-lg text-sm transition-colors flex items-center justify-center"
@@ -128,6 +57,7 @@ export default function NotificationBell() {
               )}
             </div>
             <button
+              type="button"
               onClick={() => {
                 setIsOpen(false);
                 navigate('/notifications');
@@ -140,13 +70,13 @@ export default function NotificationBell() {
 
           {/* Dropdown List */}
           <div className="max-h-80 overflow-y-auto divide-y divide-gray-800/60">
-            {notifications.length > 0 ? (
+            {notifications && notifications.length > 0 ? (
               notifications.slice(0, 5).map((item) => {
                 const isCanceled = item.type === 'BOOKING_CANCELED';
                 return (
                   <div
-                    key={item._id || item.createdAt}
-                    onClick={() => handleMarkAsRead(item._id, item.read)}
+                    key={item._id || item.createdAt || Math.random()}
+                    onClick={() => handleNotificationClick(item._id, item.read)}
                     className={`p-3 transition-colors cursor-pointer text-left flex items-start gap-3 ${
                       !item.read ? 'bg-[#161d31]/80' : 'hover:bg-[#161b2c]/50'
                     }`}
@@ -170,7 +100,7 @@ export default function NotificationBell() {
                         {item.createdAt
                           ? new Date(item.createdAt).toLocaleTimeString([], {
                               hour: '2-digit',
-                              minute: '2-digit'
+                              minute: '2-digit',
                             })
                           : 'Just now'}
                       </span>
@@ -186,9 +116,10 @@ export default function NotificationBell() {
           </div>
 
           {/* Dropdown Footer */}
-          {notifications.length > 0 && (
+          {notifications && notifications.length > 0 && (
             <div className="p-2.5 bg-[#0e1322] border-t border-gray-800 text-center">
               <button
+                type="button"
                 onClick={() => {
                   setIsOpen(false);
                   navigate('/notifications');

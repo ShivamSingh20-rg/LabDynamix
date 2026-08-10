@@ -1,7 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { io } from 'socket.io-client';
 import { BACKEND_URL } from '../pages/Api';
 
+// Initialize socket connection (shared single instance)
+const socket = io(BACKEND_URL, {
+  transports: ['websocket'], 
+  autoConnect: true,
+});
 const FIXED_TIME_SLOTS = [
   { id: 'slot-1', label: '09:00 AM - 10:00 AM', startHour: 9 },
   { id: 'slot-2', label: '10:00 AM - 11:00 AM', startHour: 10 },
@@ -13,14 +19,21 @@ const FIXED_TIME_SLOTS = [
   { id: 'slot-8', label: '04:00 PM - 05:00 PM', startHour: 16 },
 ];
 
-export default function StudentResourceCard({ resource, onBook }) {
+export default function StudentResourceCard({ resource: initialResource, onBook }) {
   const navigate = useNavigate();
 
+  // Local state to keep resource details synced with backend socket broadcasts
+  const [resource, setResource] = useState(initialResource);
   const [isSlotModalOpen, setIsSlotModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [slotBookings, setSlotBookings] = useState([]);
   const [isFetchingSlots, setIsFetchingSlots] = useState(false);
+
+  // Sync state if parent props change
+  useEffect(() => {
+    setResource(initialResource);
+  }, [initialResource]);
 
   const {
     _id,
@@ -52,10 +65,9 @@ export default function StudentResourceCard({ resource, onBook }) {
     resource?.assignedQuantity ??
     totalQuantity;
 
-  // Fallback global availability
   const overallAvailableCount = Math.max(0, assignedCount - bookedQuantity);
 
-  const getUpcomingDays = () => {
+  const availableDays = useMemo(() => {
     const days = [];
     const today = new Date();
 
@@ -72,11 +84,10 @@ export default function StudentResourceCard({ resource, onBook }) {
       days.push({ dateISO: formattedISO, label: dayLabel });
     }
     return days;
-  };
-
-  const availableDays = getUpcomingDays();
+  }, []);
 
   const isSlotExpired = (slotStartHour, dateISO) => {
+    if (!dateISO) return false;
     const now = new Date();
     const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
@@ -87,17 +98,15 @@ export default function StudentResourceCard({ resource, onBook }) {
   };
 
   const handleOpenModal = () => {
-    
+    if (!selectedDate && availableDays.length > 0) {
+      setSelectedDate(availableDays[0].dateISO);
+    }
     setIsSlotModalOpen(true);
   };
 
-  useEffect(() => {
-    if ((isSlotModalOpen || selectedSlot) && _id && selectedDate) {
-      fetchSlotBookings(_id, selectedDate);
-    }
-  }, [isSlotModalOpen, selectedSlot, _id, selectedDate]);
-
-  const fetchSlotBookings = async (resourceId, dateISO) => {
+  // Fetch initial slot state from database
+  const fetchSlotBookings = useCallback(async (resourceId, dateISO) => {
+    if (!resourceId || !dateISO) return;
     try {
       setIsFetchingSlots(true);
       const token = localStorage.getItem('token');
@@ -120,18 +129,67 @@ export default function StudentResourceCard({ resource, onBook }) {
     } finally {
       setIsFetchingSlots(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (isSlotModalOpen && _id && selectedDate) {
+      fetchSlotBookings(_id, selectedDate);
+    }
+  }, [isSlotModalOpen, _id, selectedDate, fetchSlotBookings]);
+
+  // ⚡ FIX 1: Join room on card mount regardless of modal state
+  useEffect(() => {
+  if (!_id) return;
+
+  socket.emit('join_resource_room', _id);
+
+  const handleLiveSlotUpdate = (data) => {
+    // Check if event belongs to this specific resource
+    const eventResourceId = data.resourceId || data.resource?._id || data.booking?.resourceId;
+
+    if (String(eventResourceId) === String(_id)) {
+      // 1. Update entire resource state if updated object is sent
+      if (data.updatedResource || data.resource) {
+        setResource(data.updatedResource || data.resource);
+      } 
+      // 2. Otherwise increment bookedQuantity manually if only notification came through
+      else if (data.booking || data.message) {
+        setResource((prev) => ({
+          ...prev,
+          bookedQuantity: (prev.bookedQuantity || 0) + 1,
+        }));
+      }
+
+      // 3. Append booking to slot list if booking object exists
+      if (data.booking) {
+        setSlotBookings((prevBookings) => {
+          const exists = prevBookings.some(
+            (b) => b._id === data.booking._id || b.id === data.booking.id
+          );
+          return exists ? prevBookings : [...prevBookings, data.booking];
+        });
+      }
+    }
   };
+
+  // Listen for both slot_updated and adminNewBooking
+  socket.on('slot_updated', handleLiveSlotUpdate);
+  socket.on('adminNewBooking', handleLiveSlotUpdate);
+
+  return () => {
+    socket.off('slot_updated', handleLiveSlotUpdate);
+    socket.off('adminNewBooking', handleLiveSlotUpdate);
+    socket.emit('leave_resource_room', _id);
+  };
+}, [_id]);
 
   const getSlotAvailability = (slotLabel) => {
     const countBookedForSlot = slotBookings.filter((b) => {
+      if (!b) return false;
       const bDate = b.bookingDate || b.dateISO || b.date;
-      const bSlot = b.timeSlot || b.slot;
-      return (
-        bDate === selectedDate &&
-        bSlot === slotLabel &&
-        b.status !== 'Rejected' &&
-        b.status !== 'Canceled'
-      );
+      const bSlot = b.timeSlot || b.slot || b.label;
+      const isCancelled = ['Rejected', 'Cancelled', 'Canceled'].includes(b.status);
+      return bDate === selectedDate && bSlot === slotLabel && !isCancelled;
     }).length;
 
     const remainingForSlot = Math.max(0, assignedCount - countBookedForSlot);
@@ -141,7 +199,6 @@ export default function StudentResourceCard({ resource, onBook }) {
     };
   };
 
-  // DYNAMIC AVAILABILITY: If slot is selected, display slot availability; otherwise overall
   const activeSlotLabel = selectedSlot?.label || selectedSlot;
   const slotAvailability = activeSlotLabel
     ? getSlotAvailability(activeSlotLabel).remaining
@@ -152,11 +209,10 @@ export default function StudentResourceCard({ resource, onBook }) {
 
   const isAvailable = effectiveAvailable > 0;
 
-  const handleSaveAndNavigate = () => {
+  const handleProceedToBooking = () => {
     setIsSlotModalOpen(false);
   };
 
-  
   return (
     <>
       <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden shadow-sm hover:border-slate-700 transition-all duration-200 flex flex-col justify-between max-w-sm">
@@ -195,20 +251,29 @@ export default function StudentResourceCard({ resource, onBook }) {
               )}
             </p>
 
-            {/* Dynamic Stock Display Bar */}
             <div className="mt-3 pt-2 border-t border-slate-800/80">
               <div className="flex justify-between text-xs mb-1">
                 <span className="text-slate-400 text-[11px]">
                   {selectedSlot ? 'Slot Availability' : 'Assigned Availability'}
                 </span>
-                <span className={`text-[11px] font-semibold ${isAvailable ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <span
+                  className={`text-[11px] font-semibold ${
+                    isAvailable ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
                   {effectiveAvailable} / {assignedCount} Left
                 </span>
               </div>
               <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
                 <div
-                  className={`h-full transition-all duration-300 ${isAvailable ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                  style={{ width: `${assignedCount > 0 ? (effectiveAvailable / assignedCount) * 100 : 0}%` }}
+                  className={`h-full transition-all duration-300 ${
+                    isAvailable ? 'bg-emerald-500' : 'bg-rose-500'
+                  }`}
+                  style={{
+                    width: `${
+                      assignedCount > 0 ? (effectiveAvailable / assignedCount) * 100 : 0
+                    }%`,
+                  }}
                 />
               </div>
             </div>
@@ -219,6 +284,7 @@ export default function StudentResourceCard({ resource, onBook }) {
                   <span className="font-semibold">{selectedDate}</span> | {activeSlotLabel}
                 </div>
                 <button
+                  type="button"
                   onClick={() => setSelectedSlot(null)}
                   className="text-slate-400 hover:text-slate-200 text-xs pl-1"
                 >
@@ -231,6 +297,7 @@ export default function StudentResourceCard({ resource, onBook }) {
 
         <div className="p-3.5 pt-0 space-y-1.5">
           <button
+            type="button"
             onClick={handleOpenModal}
             className="w-full py-1.5 px-3 text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 rounded transition-colors"
           >
@@ -238,22 +305,15 @@ export default function StudentResourceCard({ resource, onBook }) {
           </button>
 
           <button
-              onClick={() => {
-
+            type="button"
+            onClick={() => {
               navigate(`/resource/${_id}`, {
-
                 state: {
-
                   resource,
-
-                  selectedDate,
-
-                  selectedSlot: selectedSlot?.label || selectedSlot,
-
+                  selectedDate: selectedDate || availableDays[0].dateISO,
+                  selectedSlot: selectedSlot?.label || selectedSlot || null,
                 },
-
               });
-
             }}
             disabled={!isAvailable}
             className={`w-full py-1.5 px-3 text-xs font-semibold rounded transition-all ${
@@ -262,7 +322,11 @@ export default function StudentResourceCard({ resource, onBook }) {
                 : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-950'
             }`}
           >
-            {!isAvailable ? 'Out of Stock' : selectedSlot ? 'Confirm & Book Now' : 'Book Now'}
+            {!isAvailable
+              ? 'Out of Stock'
+              : selectedSlot
+              ? 'Confirm & Book Now'
+              : 'Book Now'}
           </button>
         </div>
       </div>
@@ -274,10 +338,12 @@ export default function StudentResourceCard({ resource, onBook }) {
               <div>
                 <h4 className="text-sm font-bold text-slate-100">{name}</h4>
                 <p className="text-[11px] text-indigo-400 font-medium mt-0.5">
-                  🏛️ {displayLabName} {displayLabLocation ? `(${displayLabLocation})` : ''}
+                  🏛️ {displayLabName}{' '}
+                  {displayLabLocation ? `(${displayLabLocation})` : ''}
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setIsSlotModalOpen(false)}
                 className="text-slate-400 hover:text-slate-200 text-base p-1"
               >
@@ -295,6 +361,7 @@ export default function StudentResourceCard({ resource, onBook }) {
                   return (
                     <button
                       key={day.dateISO}
+                      type="button"
                       onClick={() => {
                         setSelectedDate(day.dateISO);
                         if (
@@ -310,7 +377,7 @@ export default function StudentResourceCard({ resource, onBook }) {
                           : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:border-slate-600'
                       }`}
                     >
-                      {day.label}
+                      {day.label} ({day.dateISO})
                     </button>
                   );
                 })}
@@ -339,6 +406,7 @@ export default function StudentResourceCard({ resource, onBook }) {
                   return (
                     <button
                       key={slot.id}
+                      type="button"
                       disabled={slotDisabled}
                       onClick={() => setSelectedSlot(slot)}
                       className={`p-2 rounded-lg border text-left transition-all ${
@@ -377,14 +445,16 @@ export default function StudentResourceCard({ resource, onBook }) {
 
             <div className="mt-5 pt-3 border-t border-slate-800 flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => setIsSlotModalOpen(false)}
                 className="px-3.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 rounded border border-slate-700"
               >
-                Close
+                Cancel
               </button>
 
               <button
-                onClick={handleSaveAndNavigate}
+                type="button"
+                onClick={handleProceedToBooking}
                 disabled={!selectedSlot || !selectedDate}
                 className={`px-4 py-1.5 text-xs font-semibold rounded transition-all ${
                   selectedSlot && selectedDate
