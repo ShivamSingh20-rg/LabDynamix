@@ -3,3 +3,5 @@
 .env
 backend/.env
 Labdynamic/.env
+node_modules/
+dist/
