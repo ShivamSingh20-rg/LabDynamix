@@ -13,7 +13,7 @@ const userRoutes = require('./Routes/Admin.user.route');
 const notificationRoutes = require('./Routes/notification.route');
 const bookingRoutes = require('./Routes/booking.route');
 const facultyRoutes = require('./Routes/Faculty.route');
-
+const adminBookingRoutes = require('./Routes/Admin.booking.route');
 const app = express();
 
 connectDB();
@@ -63,7 +63,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/faculty', facultyRoutes);
-
+app.use('/api/bookings/admin', adminBookingRoutes);
 // Root Health Check
 app.get('/', (req, res) => {
   res.send('LabDynamix API Engine is running...');

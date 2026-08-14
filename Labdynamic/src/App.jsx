@@ -19,6 +19,7 @@ import FacultyApprovedBookings from "./Faculty/pages/facultyapproved";
 import ResourceDetails from "./pages/ResourceDetailpage";
 import FacultyLab from "./Faculty/pages/FacultyLabs";
 import BookingDetail from "./pages/BookingDetail";
+import StudentRequest from "./Admin/pages/StudentRequest";
 import MyBookings from "./pages/MyBooking";
 import FacultyNOtifications from "./Faculty/pages/Notification";
 import StudentBookingRequest from "./Faculty/pages/Bookingrequest";
@@ -129,6 +130,10 @@ export default function App() {
             <Route 
               path="/admin/users" 
               element={isAdmin ? <AdminUsers user={user} /> : <Navigate to="/" replace />} 
+            />
+            <Route 
+              path="/admin/requests" 
+              element={isAdmin ? <StudentRequest user={user} /> : <Navigate to="/" replace />} 
             />
 
             {/* Catch-all Fallback */}

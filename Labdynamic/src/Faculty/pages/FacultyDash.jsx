@@ -8,79 +8,197 @@ export default function FacultyDashboard() {
   const { user } = useAuth();
   const { socket } = useSocket();
 
-  // State
+  // Separate states for raw and UI data
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [rawPendingBookings, setRawPendingBookings] = useState([]);
+
+  const [approvedBookings, setApprovedBookings] = useState([]);
+  const [rawApprovedBookings, setRawApprovedBookings] = useState([]);
+
+  const [resourcesList, setResourcesList] = useState([]);
+  
   const [stats, setStats] = useState({
-    pending: 8,
-    approved: 12,
-    todayBookings: 4,
+    pending: 0,
+    approved: 0,
+    totalBookings: 0,
     resources: 45,
   });
 
-  const [pendingRequests, setPendingRequests] = useState([
-    { id: '1', student: 'Rahul', resource: 'Arduino', date: '10 Aug', time: '10-11' },
-    { id: '2', student: 'Aman', resource: 'Projector', date: '10 Aug', time: '11-12' },
-    { id: '3', student: 'Priya', resource: 'RaspberryPi', date: '11 Aug', time: '2-3' },
-  ]);
+  const [loadingPending, setLoadingPending] = useState(true);
+  const [loadingApproved, setLoadingApproved] = useState(true);
+  const [loadingResources, setLoadingResources] = useState(true);
 
-  const [todaySchedule] = useState([
-    { time: '09:00 - 10:00', lab: 'Electronics Lab', status: 'Available', isAvailable: true },
-    { time: '10:00 - 12:00', lab: 'Electronics Lab', status: 'Java Practical', isAvailable: false },
-    { time: '12:00 - 01:00', lab: 'Electronics Lab', status: 'Available', isAvailable: true },
-    { time: '02:00 - 04:00', lab: 'Computer Lab', status: 'Workshop', isAvailable: false },
-  ]);
-
+  // Static upcoming bookings fallback
   const [upcomingBookings] = useState([
     { lab: 'Electronics Lab', date: '12 Aug', time: '10-12', status: 'Approved' },
     { lab: 'Computer Lab', date: '14 Aug', time: '02-04', status: 'Pending' },
   ]);
 
-  // Handle Approve / Reject Actions
-  const handleAction = async (requestId, action) => {
-    try {
-      const token = localStorage.getItem('labToken') || localStorage.getItem('token');
-      await axios.put(
-        `${BACKEND_URL}/bookings/${requestId}/${action}`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+  const getToken = () => localStorage.getItem('token') || localStorage.getItem('labToken');
 
-      // Remove item locally upon success
-      setPendingRequests((prev) => prev.filter((item) => item.id !== requestId));
-      setStats((prev) => ({
-        ...prev,
-        pending: Math.max(0, prev.pending - 1),
-        approved: action === 'approve' ? prev.approved + 1 : prev.approved,
-      }));
+  // 1. Fetch Pending Bookings
+  const fetchPendingBookings = async () => {
+    try {
+      const token = getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const response = await axios.get(`${BACKEND_URL}/faculty/pending`, { headers });
+      const pendingData = response.data?.bookings || response.data || [];
+
+      setRawPendingBookings(pendingData);
+
+      if (pendingData.length > 0) {
+        const formattedPending = pendingData.map((item) => ({
+          id: item._id,
+          student: item.user?.name || item.studentName || 'Unknown Student',
+          resource: item.resource?.name || item.resourceName || 'Resource',
+          date: item.bookingDate || item.date || 'Today',
+          time: item.timeSlot || item.slot || 'N/A',
+        }));
+        setPendingRequests(formattedPending);
+        setStats((prev) => {
+          const newPending = formattedPending.length;
+          return {
+            ...prev,
+            pending: newPending,
+            totalBookings: newPending + prev.approved,
+          };
+        });
+      }
     } catch (err) {
-      console.error(`Failed to ${action} request:`, err);
-      // Fallback UI update for testing
-      setPendingRequests((prev) => prev.filter((item) => item.id !== requestId));
+      console.warn('Failed to fetch pending bookings:', err.message);
+    } finally {
+      setLoadingPending(false);
     }
   };
 
-  // Listen for real-time incoming student requests
+  // 2. Fetch Approved Bookings
+  const fetchApprovedBookings = async () => {
+    try {
+      const token = getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const response = await axios.get(`${BACKEND_URL}/faculty/approved`, { headers });
+      const approvedData = response.data?.bookings || response.data || [];
+
+      setRawApprovedBookings(approvedData);
+
+      if (approvedData.length > 0) {
+        const formattedApproved = approvedData.map((item) => ({
+          id: item._id,
+          student: item.user?.name || item.studentName || 'Unknown Student',
+          resource: item.resource?.name || item.resourceName || 'Resource',
+          date: item.bookingDate || item.date || 'Today',
+          time: item.timeSlot || item.slot || 'N/A',
+        }));
+        setApprovedBookings(formattedApproved);
+        setStats((prev) => {
+          const newApproved = formattedApproved.length;
+          return {
+            ...prev,
+            approved: newApproved,
+            totalBookings: prev.pending + newApproved,
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to fetch approved bookings:', err.message);
+    } finally {
+      setLoadingApproved(false);
+    }
+  };
+
+  // 3. Fetch Resources
+  const fetchResources = async () => {
+    try {
+      const token = getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const response = await axios.get(`${BACKEND_URL}/resources`, { headers });
+      const resourcesData = response.data || [];
+      setResourcesList(resourcesData);
+
+      if (resourcesData.length > 0) {
+        setStats((prev) => ({ ...prev, resources: resourcesData.length }));
+      }
+    } catch (err) {
+      console.warn('Failed to fetch resources:', err.message);
+    } finally {
+      setLoadingResources(false);
+    }
+  };
+
+  // Trigger API calls independently on mount
   useEffect(() => {
-    const handleLiveBooking = (e) => {
-      const newReq = e.detail;
-      if (!newReq) return;
+    fetchPendingBookings();
+    fetchApprovedBookings();
+    fetchResources();
+  }, []);
 
-      setPendingRequests((prev) => [
-        {
-          id: newReq._id || Date.now().toString(),
-          student: newReq.studentName || 'Student',
-          resource: newReq.resourceName || 'Resource',
-          date: newReq.date || 'Today',
-          time: newReq.slot || '10-11',
-        },
-        ...prev,
-      ]);
+  // Real-time Socket listener
+  useEffect(() => {
+    if (!socket) return;
 
-      setStats((prev) => ({ ...prev, pending: prev.pending + 1 }));
+    const handleNewBooking = (payload) => {
+      setRawPendingBookings((prev) => [payload, ...prev]);
+      setPendingRequests((prev) => {
+        const updated = [
+          {
+            id: payload.bookingId || payload._id || Date.now().toString(),
+            student: payload.studentName || 'Student',
+            resource: payload.resourceName || 'Resource',
+            date: payload.date || 'Today',
+            time: payload.timeSlot || 'N/A',
+          },
+          ...prev,
+        ];
+        setStats((s) => ({
+          ...s,
+          pending: updated.length,
+          totalBookings: updated.length + s.approved,
+        }));
+        return updated;
+      });
     };
 
-    window.addEventListener('newBookingRequest', handleLiveBooking);
-    return () => window.removeEventListener('newBookingRequest', handleLiveBooking);
-  }, []);
+    socket.on('newBookingRequest', handleNewBooking);
+    return () => socket.off('newBookingRequest', handleNewBooking);
+  }, [socket]);
+
+  // Handle Approve / Reject Actions using PATCH /faculty/respond/:bookingId
+  const handleAction = async (requestId, actionType) => {
+    try {
+      const token = getToken();
+      const backendAction = actionType === 'approve' ? 'Approved' : 'Rejected';
+
+      await axios.patch(
+        `${BACKEND_URL}/faculty/respond/${requestId}`,
+        { 
+          action: backendAction, 
+          rejectionReason: actionType === 'reject' ? 'Rejected by faculty member.' : undefined 
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err) {
+      console.warn('API action call failed, updating UI locally anyway:', err.message);
+    } finally {
+      setPendingRequests((prev) => {
+        const filtered = prev.filter((item) => item.id !== requestId);
+        setStats((s) => {
+          const newPending = Math.max(0, s.pending - 1);
+          const newApproved = actionType === 'approve' ? s.approved + 1 : s.approved;
+          return {
+            ...s,
+            pending: newPending,
+            approved: newApproved,
+            totalBookings: newPending + newApproved,
+          };
+        });
+        return filtered;
+      });
+      setRawPendingBookings((prev) => prev.filter((item) => (item._id || item.id) !== requestId));
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto p-6 bg-slate-950 text-slate-100 min-h-screen font-sans">
@@ -95,30 +213,22 @@ export default function FacultyDashboard() {
       {/* Metrics Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl text-center shadow-sm">
-          <div className="text-xs text-slate-400 font-medium flex items-center justify-center gap-1">
-            📋 Pending Requests
-          </div>
+          <div className="text-xs text-slate-400 font-medium">📋 Pending Requests</div>
           <p className="text-2xl font-extrabold text-white mt-2">{stats.pending}</p>
         </div>
 
         <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl text-center shadow-sm">
-          <div className="text-xs text-slate-400 font-medium flex items-center justify-center gap-1">
-            🟢 Approved Bookings
-          </div>
+          <div className="text-xs text-slate-400 font-medium">🟢 Approved Bookings</div>
           <p className="text-2xl font-extrabold text-white mt-2">{stats.approved}</p>
         </div>
 
         <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl text-center shadow-sm">
-          <div className="text-xs text-slate-400 font-medium flex items-center justify-center gap-1">
-            🧪 Today's Bookings
-          </div>
-          <p className="text-2xl font-extrabold text-white mt-2">{stats.todayBookings}</p>
+          <div className="text-xs text-slate-400 font-medium">📊 Total Bookings</div>
+          <p className="text-2xl font-extrabold text-white mt-2">{stats.totalBookings}</p>
         </div>
 
         <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl text-center shadow-sm">
-          <div className="text-xs text-slate-400 font-medium flex items-center justify-center gap-1">
-            📦 Resources
-          </div>
+          <div className="text-xs text-slate-400 font-medium">📦 Resources</div>
           <p className="text-2xl font-extrabold text-white mt-2">{stats.resources}</p>
         </div>
       </div>
@@ -126,7 +236,7 @@ export default function FacultyDashboard() {
       {/* Section 1: Pending Student Requests */}
       <div className="mb-8">
         <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-3 flex items-center gap-2">
-          📋 Pending Student Requests
+          📋 Pending Student Requests {loadingPending && <span className="text-slate-500 font-normal">(Syncing...)</span>}
         </h2>
         <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
@@ -181,32 +291,7 @@ export default function FacultyDashboard() {
         </div>
       </div>
 
-      {/* Section 2: Today's Lab Schedule */}
-      <div className="mb-8">
-        <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-3 flex items-center gap-2">
-          📅 Today's Lab Schedule
-        </h2>
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-800/60 text-xs">
-          {todaySchedule.map((item, idx) => (
-            <div key={idx} className="flex items-center justify-between p-3.5 px-4 hover:bg-slate-900/80 transition-colors">
-              <span className="font-mono text-slate-400">{item.time}</span>
-              <span className="font-medium text-slate-200">{item.lab}</span>
-              <div className="flex items-center gap-2">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    item.isAvailable ? 'bg-emerald-500' : 'bg-rose-500'
-                  }`}
-                />
-                <span className={item.isAvailable ? 'text-emerald-400' : 'text-slate-300'}>
-                  {item.status}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Section 3: My Upcoming Bookings */}
+      {/* Section 2: My Upcoming Bookings */}
       <div className="mb-6">
         <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-3 flex items-center gap-2">
           📝 My Upcoming Bookings
@@ -220,16 +305,8 @@ export default function FacultyDashboard() {
                 <span>{item.time}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    item.status === 'Approved' ? 'bg-emerald-500' : 'bg-amber-500'
-                  }`}
-                />
-                <span
-                  className={item.status === 'Approved' ? 'text-emerald-400' : 'text-amber-400'}
-                >
-                  {item.status}
-                </span>
+                <span className={`w-2 h-2 rounded-full ${item.status === 'Approved' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                <span className={item.status === 'Approved' ? 'text-emerald-400' : 'text-amber-400'}>{item.status}</span>
               </div>
             </div>
           ))}
