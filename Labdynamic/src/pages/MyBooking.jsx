@@ -301,6 +301,12 @@ const MyBookings = () => {
     );
   }
 
+  //dfghj
+  //WOW
+  //dfghj
+  //ASDFGHJK
+
+
   return (
     <div className="max-w-3xl mx-auto my-10 px-5 text-slate-50 font-sans">
       {/* Header Section */}
@@ -308,7 +314,7 @@ const MyBookings = () => {
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-slate-50">My Resource Bookings</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Track real-time approval status and upcoming lab slot schedules.
+            Track real-time approval status and upcoming lab slot socks schedules.
           </p>
         </div>
         <div className="bg-slate-900 text-slate-300 text-xs font-semibold px-3.5 py-1.5 rounded-full border border-slate-800 shadow-sm">
